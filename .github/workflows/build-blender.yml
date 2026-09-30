@@ -1,0 +1,81 @@
+# Manual Blender build. The first runnable target is "lite": a GUI Blender
+# with most optional libraries turned off, so it fits a GitHub-hosted runner.
+# The job runs Blender headless to prove the binary starts, then uploads bin/.
+# Open the downloaded blender.exe on your own machine for the GUI.
+
+name: Build Blender
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        type: choice
+        options:
+          - lite
+          - developer
+        default: lite
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - name: Free disk space
+        shell: pwsh
+        run: |
+          $paths = @(
+            "$env:ProgramFiles\Android",
+            "${env:ProgramFiles(x86)}\Android",
+            "$env:SystemDrive\Android"
+          )
+          foreach ($path in $paths) {
+            if (Test-Path $path) { Remove-Item -Recurse -Force $path }
+          }
+          Get-PSDrive -Name C | Select-Object Used,Free
+
+      - name: Checkout Blender
+        uses: actions/checkout@v4
+        with:
+          repository: blender/blender
+          ref: main
+          path: blender
+          fetch-depth: 1
+          submodules: false
+
+      - name: Fetch precompiled libraries
+        shell: cmd
+        working-directory: blender
+        run: |
+          git lfs install
+          .\make.bat update
+          if errorlevel 1 exit /b 1
+
+      - name: Build
+        shell: cmd
+        working-directory: blender
+        run: |
+          .\make.bat ${{ inputs.target }} ninja
+          if errorlevel 1 exit /b 1
+
+      - name: Run headless
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path . -Recurse -Filter blender.exe |
+            Where-Object { $_.FullName -match 'build_windows' } |
+            Select-Object -First 1
+          if (-not $exe) { throw "blender.exe was not produced" }
+          Write-Host "Running $($exe.FullName)"
+          & $exe.FullName --background --factory-startup --python-expr "import bpy; print('BLENDER_OK', bpy.app.version_string)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Blender
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-windows-${{ inputs.target }}
+          path: build_windows*/bin/**
+          retention-days: 3
+          if-no-files-found: error
