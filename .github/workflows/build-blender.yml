@@ -51,6 +51,15 @@ jobs:
         working-directory: blender
         run: |
           git lfs install
+          rem check_libraries.cmd asks y/n when lib/windows_x64 is absent.
+          rem Answer that before make.bat update so the job does not stop.
+          git config --local submodule.lib/windows_x64.update checkout
+          set GIT_LFS_SKIP_SMUDGE=1
+          git submodule update --progress --init lib/windows_x64
+          if errorlevel 1 exit /b 1
+          set GIT_LFS_SKIP_SMUDGE=
+          git -C lib/windows_x64 lfs pull
+          if errorlevel 1 exit /b 1
           .\make.bat update
           if errorlevel 1 exit /b 1
 
